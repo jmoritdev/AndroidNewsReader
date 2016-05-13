@@ -12,6 +12,12 @@ import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.TextView;
 
+import com.firebase.client.ChildEventListener;
+import com.firebase.client.DataSnapshot;
+import com.firebase.client.Firebase;
+import com.firebase.client.FirebaseError;
+import com.firebase.client.ValueEventListener;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -21,39 +27,61 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
-    static final String URL_IDS = "https://hacker-news.firebaseio.com/v0/topstories.json";
     static final String URL_ART_START = "https://hacker-news.firebaseio.com/v0/item/";
-    static final String URL_ART_END = ".json";
 
-    ListView listview;
-    TextView textview;
-    ImageView imageView;
-
-    ArrayAdapter<String> arrayAdapter;
-    ArrayList<String> titleList;
     ArrayList<String> urlList;
 
+    ArrayAdapter<String> adapter;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        listview = (ListView) findViewById(R.id.listView);
-        textview = (TextView) findViewById(R.id.textView);
-        imageView = (ImageView) findViewById(R.id.imageView);
-        imageView.setVisibility(View.INVISIBLE);
+        // Get ListView object from xml
+        final ListView listView = (ListView) findViewById(R.id.listView);
 
-        titleList = new ArrayList<String>();
+        adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_list_item_1, android.R.id.text1);
+
+        // Assign adapter to ListView
+        listView.setAdapter(adapter);
+
+        // Use Firebase to populate the list.
+        Firebase.setAndroidContext(this);
+        //https://burning-inferno-4491.firebaseio.com/todoItems
+
+        final List idList = new ArrayList<String>();
+
+        new Firebase("https://hacker-news.firebaseio.com/v0/newstories")
+                .addChildEventListener(new ChildEventListener() {
+                    public void onChildAdded(DataSnapshot dataSnapshot, String s) {
+                        idList.add((long) dataSnapshot.getValue());
+                        //update list()
+                    }
+
+                    public void onChildRemoved(DataSnapshot dataSnapshot) {
+                        adapter.remove((String) dataSnapshot.getValue());
+                    }
+
+                    public void onChildChanged(DataSnapshot dataSnapshot, String s) {
+                        initData((long) dataSnapshot.getValue());
+                    }
+
+                    public void onChildMoved(DataSnapshot dataSnapshot, String s) {
+                    }
+
+                    public void onCancelled(FirebaseError firebaseError) {
+                    }
+                });
+
         urlList = new ArrayList<String>();
 
-        arrayAdapter = new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, titleList);
-        listview.setAdapter(arrayAdapter);
-
-        listview.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+        listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(urlList.get(position)));
@@ -61,103 +89,21 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        new DownloadTask().execute();
     }
 
-    class DownloadTask extends AsyncTask<Void, String, Void> {
-
-        @Override
-        protected Void doInBackground(Void... params) {
-            String resArray = "";
-            HttpURLConnection connection = null;
-            InputStream in = null;
-            InputStreamReader reader = null;
-
-            try {
-                URL urlIds = new URL(URL_IDS);
-                connection = (HttpURLConnection) urlIds.openConnection();
-                in = connection.getInputStream();
-                reader = new InputStreamReader(in);
-                int data = reader.read();
-                while (data != -1){
-                    char c = (char) data;
-                    resArray += c;
-                    data = reader.read();
-                }
-
-                JSONArray jsonArray = new JSONArray(resArray);
-                int index = 0;
-                for(int x = 0; x < jsonArray.length(); x++){
-                    String id = jsonArray.getString(x);
-                    URL articleUrl = new URL(URL_ART_START + id + URL_ART_END);
-                    connection = (HttpURLConnection) articleUrl.openConnection();
-                    in = connection.getInputStream();
-                    reader = new InputStreamReader(in);
-                    String jsonObjectString = "";
-                    data = reader.read();
-                    while (data != -1){
-                        char c = (char) data;
-                        jsonObjectString += c;
-                        data = reader.read();
-                    }
-                    JSONObject jsonObject = new JSONObject(jsonObjectString);
-
-                    if(jsonObject.has("title") && jsonObject.has("url")){
-                        titleList.add(jsonObject.getString("title"));
-                        urlList.add(jsonObject.getString("url"));
-                        publishProgress("Al " + index + " artikels gedownload.");
-                        index++;
-                    }
-                }
-
-            } catch (Exception e){
-                e.printStackTrace();
-            } finally {
-                if(connection != null){
-                    connection.disconnect();
-                }
-                if(in != null){
-                    try{
-                        in.close();
-                    } catch (IOException e){
-                        e.printStackTrace();
-                    }
-                }
-                if(reader != null){
-                    try{
-                        reader.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
+    //update list??
+    public void initData(long articleId){
+        new Firebase(URL_ART_START + articleId).addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot dataSnapshot) {
+                adapter.add((String) dataSnapshot.child("title").getValue());
+                urlList.add((String) dataSnapshot.child("url").getValue());
             }
 
-            return null;
-        }
+            @Override
+            public void onCancelled(FirebaseError firebaseError) {
 
-        @Override
-        protected void onProgressUpdate(String... values) {
-            super.onProgressUpdate(values);
-
-            String update = values[0];
-            textview.setText(update);
-            textview.setVisibility(View.VISIBLE);
-        }
-
-        @Override
-        protected void onPostExecute(Void aVoid) {
-            super.onPostExecute(aVoid);
-            arrayAdapter.notifyDataSetChanged();
-            textview.setVisibility(View.INVISIBLE);
-            imageView.setVisibility(View.VISIBLE);
-        }
-    }
-
-    public void refresh(View view){
-        imageView.setVisibility(View.INVISIBLE);
-        titleList.clear();
-        urlList.clear();
-        arrayAdapter.notifyDataSetChanged();
-        new DownloadTask().execute();
+            }
+        });
     }
 }
